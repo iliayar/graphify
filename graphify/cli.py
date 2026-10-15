@@ -2370,6 +2370,7 @@ def dispatch_command(cmd: str) -> None:
         # so `is not None` already means "explicitly passed" for those.)
         label_max_concurrency_explicit = False
         label_batch_size_explicit = False
+        label_acp_command: str | None = None
         i_arg = 0
         while i_arg < len(args):
             a = args[i_arg]
@@ -2401,12 +2402,25 @@ def dispatch_command(cmd: str) -> None:
                 label_batch_size = int(a.split("=", 1)[1]); label_batch_size_explicit = True; i_arg += 1
             elif a in ("--no-viz", "--missing-only") or a.startswith("--min-community-size="):
                 i_arg += 1
+            elif a == "--acp-command" and i_arg + 1 < len(args):
+                label_acp_command = args[i_arg + 1]; i_arg += 2
+            elif a.startswith("--acp-command="):
+                label_acp_command = a.split("=", 1)[1]; i_arg += 1
             elif a.startswith("--"):
                 i_arg += 1
             elif watch_path is None:
                 watch_path = Path(a); i_arg += 1
             else:
                 i_arg += 1
+        if label_acp_command is not None:
+            os.environ["GRAPHIFY_ACP_COMMAND"] = label_acp_command  # the flag wins over the env var
+            label_backend = label_backend or "acp"
+        if label_backend and "--no-save" not in args:
+            from graphify.llm import _backend_usable, remember_backend_choice
+            if _backend_usable(label_backend):
+                remember_backend_choice(
+                    backend=label_backend, model=label_model, acp_command=label_acp_command,
+                )
         if watch_path is None:
             watch_path = Path(".")
         graph_json = graph_override if graph_override is not None else watch_path / _GRAPHIFY_OUT / "graph.json"
@@ -3648,7 +3662,7 @@ def dispatch_command(cmd: str) -> None:
         # has an API key set.
         if len(sys.argv) < 3:
             print(
-                "Usage: graphify extract <path> [--backend gemini|kimi|claude|openai|deepseek|ollama] "
+                "Usage: graphify extract <path> [--backend gemini|kimi|claude|openai|deepseek|ollama|acp] "
                 "[--model M] [--mode deep] [--out DIR|--output DIR] [--google-workspace] [--no-cluster] "
                 "[--no-gitignore] [--code-only] [--no-dedup] "
                 "[--max-workers N] [--token-budget N] [--max-concurrency N] "
@@ -3670,6 +3684,8 @@ def dispatch_command(cmd: str) -> None:
 
         backend: str | None = None
         model: str | None = None
+        acp_command_arg: str | None = None
+        no_save = False
         extract_mode: str | None = None
         out_dir: Path | None = None
         cli_postgres_dsn: str | None = None
@@ -3740,6 +3756,12 @@ def dispatch_command(cmd: str) -> None:
                 model = args[i + 1]; i += 2
             elif a.startswith("--model="):
                 model = a.split("=", 1)[1]; i += 1
+            elif a == "--acp-command" and i + 1 < len(args):
+                acp_command_arg = args[i + 1]; i += 2
+            elif a.startswith("--acp-command="):
+                acp_command_arg = a.split("=", 1)[1]; i += 1
+            elif a == "--no-save":
+                no_save = True; i += 1
             elif a == "--mode" and i + 1 < len(args):
                 extract_mode = args[i + 1]; i += 2
             elif a.startswith("--mode="):
@@ -3812,6 +3834,15 @@ def dispatch_command(cmd: str) -> None:
                 cli_timing = True; i += 1
             else:
                 i += 1
+
+        if acp_command_arg is not None:
+            if not acp_command_arg.strip():
+                print("error: --acp-command needs the agent's command, e.g. 'omp acp'", file=sys.stderr)
+                sys.exit(2)
+            os.environ["GRAPHIFY_ACP_COMMAND"] = acp_command_arg  # the flag wins over the env var
+            if backend is None:
+                backend = "acp"
+        explicit_backend = backend  # what the user typed (None -> auto-detected below)
 
         if not has_path and cli_postgres_dsn is None:
             print("error: must specify a path to scan or a --postgres DSN", file=sys.stderr)
@@ -4148,10 +4179,11 @@ def dispatch_command(cmd: str) -> None:
                     hint = (" Or pass --code-only to index just the code "
                             "(local AST, no key) and skip the non-code files.")
                 print(
-                    "error: no LLM API key found (" + "; ".join(reasons) + "). "
-                    "Set GEMINI_API_KEY or GOOGLE_API_KEY (gemini), MOONSHOT_API_KEY "
-                    "(kimi), ANTHROPIC_API_KEY (claude), OPENAI_API_KEY (openai), "
-                    "DEEPSEEK_API_KEY (deepseek), or pass --backend. A code-only "
+                    "error: no LLM backend available (" + "; ".join(reasons) + "). "
+                    "Install an ACP agent such as omp (the default, needs no key) or pass "
+                    "--acp-command, or set GEMINI_API_KEY or GOOGLE_API_KEY (gemini), "
+                    "MOONSHOT_API_KEY (kimi), ANTHROPIC_API_KEY (claude), OPENAI_API_KEY "
+                    "(openai), DEEPSEEK_API_KEY (deepseek), or pass --backend. A code-only "
                     "corpus needs no key." + hint,
                     file=sys.stderr,
                 )
@@ -4197,12 +4229,31 @@ def dispatch_command(cmd: str) -> None:
                             file=sys.stderr,
                         )
                         sys.exit(1)
+                elif backend == "acp":
+                    from graphify.acp import acp_available
+                    allow_no_key = acp_available()
+                    if not allow_no_key:
+                        print(
+                            "error: backend 'acp' needs GRAPHIFY_ACP_COMMAND set to an ACP "
+                            "agent's command that is on $PATH (e.g. 'claude-agent-acp' or "
+                            "'gemini --acp').",
+                            file=sys.stderr,
+                        )
+                        sys.exit(1)
                 if not allow_no_key:
                     print(
                         f"error: backend '{backend}' requires {_format_backend_env_keys(backend)} to be set.",
                         file=sys.stderr,
                     )
                     sys.exit(1)
+
+        # A backend chosen by hand is remembered, so the next run needs no flags.
+        if not no_save and explicit_backend:
+            from graphify.llm import _backend_usable, remember_backend_choice
+            if _backend_usable(explicit_backend):
+                remember_backend_choice(
+                    backend=explicit_backend, model=model, acp_command=acp_command_arg,
+                )
 
         # Track whether this run's extraction was incomplete (a whole extractor
         # pass crashed, or some semantic chunks failed). A partial result must not

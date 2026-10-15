@@ -851,7 +851,7 @@ def test_extract_without_key_still_errors_when_docs_present(
         mainmod.main()
     assert exc_info.value.code == 1
     err = capsys.readouterr().err
-    assert "no LLM API key found" in err
+    assert "no LLM backend available" in err
     assert "code-only corpus needs no key" in err
     assert not (out_dir / "graphify-out" / "graph.json").exists()
 

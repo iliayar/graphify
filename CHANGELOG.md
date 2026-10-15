@@ -7,6 +7,9 @@ Full release notes with details on each version: [GitHub Releases](https://githu
 - Feat: **Cangjie** (`.cj`) and **Nix** (`.nix`) support through a generic tree-sitter tags-query extractor (`graphify/extractors/tags.py`): definitions, methods, supertypes, imports and calls come from `queries/*.scm`, so adding a language needs a grammar and a suffix, not a new extractor
 - Feat: tree-sitter grammars are now discovered at runtime from `GRAPHIFY_TS_GRAMMAR_PATH` (`graphify/ts_loader.py`), after installed PyPI packages; any `import tree_sitter_<lang>` in an extractor resolves to a dynamically supplied parser, so new grammars need no dependency in `pyproject.toml`
 - Feat: `flake.nix` — `nix run`/`nix build`/`nix develop` with grammars (including Cangjie) taken from nixpkgs and wired through `GRAPHIFY_TS_GRAMMAR_PATH`
+- Feat: **`--backend acp`** — semantic extraction and community labeling through any Agent Client Protocol agent (e.g. `claude-agent-acp`, `gemini --acp`), authenticated by the agent itself instead of an API key. stdlib-only client in `graphify/acp.py`
+- Feat: **ACP is now the default backend, with `omp acp` as the default agent**: with no `--backend`, an available ACP agent is chosen before any API key (`GRAPHIFY_ACP_COMMAND` → saved `--acp-command` → built-in omp, run with tools/extensions/skills/session files off). Behavior change: a machine with `omp` installed and an API key set now uses omp; pass `--backend <name>` once to keep the keyed provider
+- Feat: a `--backend` / `--model` / `--acp-command` passed by hand to `extract` or `cluster-only` is saved to `~/.graphify/config.json` and reused without flags (`--no-save` skips; a saved backend that is no longer usable is ignored with a warning)
 
 ## 0.9.91 (2026-10-14)
 

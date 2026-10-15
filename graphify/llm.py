@@ -17,6 +17,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from graphify import backend_config
+
 from graphify.extractors.base import _read_source_text
 from graphify.file_slice import (
     FileSlice,
@@ -242,6 +244,17 @@ BACKENDS: dict[str, dict] = {
         # Claude Code is multimodal; images are passed by path and read with the
         # CLI's Read tool rather than as inline base64 (see `_call_claude_cli`).
         "vision": True,
+    },
+    "acp": {
+        # Routes through an Agent Client Protocol agent (GRAPHIFY_ACP_COMMAND:
+        # Claude Code, Gemini CLI, Codex, opencode, ...). The agent owns auth, so
+        # no API key is read. See graphify/acp.py. Images are not forwarded:
+        # the agent's multimodal support is not known up front, so they become
+        # text reference nodes like on any non-vision backend.
+        "default_model": "acp-agent",
+        "pricing": {"input": 0.0, "output": 0.0},
+        "temperature": 0,
+        "max_tokens": 16384,
     },
 }
 
@@ -1364,6 +1377,9 @@ def _default_model_for_backend(backend: str) -> str:
         model = os.environ.get(model_env_key)
         if model:
             return model
+    saved = backend_config.load()
+    if saved.get("backend") == backend and saved.get("model"):
+        return saved["model"]  # a --model given by hand on an earlier run
     return cfg["default_model"]
 
 
@@ -1945,6 +1961,36 @@ def _call_claude_cli(user_message: str, max_tokens: int = 8192, *, deep_mode: bo
     return result
 
 
+def _call_acp(user_message: str, max_tokens: int = 8192, *, deep_mode: bool = False, images: list[_ImageRef] | None = None) -> dict:
+    """Call an Agent Client Protocol agent (``GRAPHIFY_ACP_COMMAND``).
+
+    Like `_call_claude_cli`, the extraction instructions travel in the user turn
+    (an ACP agent is a coding agent with its own system prompt, so a separate
+    system channel is not available). The agent reports no token usage over ACP,
+    so token counts are 0 and the estimated cost is $0; the agent bills itself.
+    """
+    from graphify import acp
+
+    if images:
+        user_message = _with_image_notes(user_message, images)
+    combined_message = (
+        _extraction_system(deep=deep_mode)
+        + "\n\n---\n"
+        + "Now extract the knowledge graph from the following source file(s) "
+        + "and output ONLY the JSON object described above. No prose, no "
+        + "preamble, no markdown fences, and do not use any tools.\n\n"
+        + user_message
+    )
+    reply, stop_reason, agent = acp.prompt(combined_message, timeout=_resolve_api_timeout())
+    result = _parse_llm_json(reply or "{}")
+    result["input_tokens"] = 0
+    result["output_tokens"] = 0
+    result["model"] = agent
+    result["finish_reason"] = "length" if stop_reason in ("max_tokens", "max_turn_requests") else "stop"
+    _mark_hollow(result, reply, "acp")
+    return result
+
+
 def _azure_client(api_key: str, endpoint: str):
     """Construct an AzureOpenAI client with env-driven api_version and timeout."""
     try:
@@ -2082,6 +2128,7 @@ def extract_files_direct(
                 "No LLM backend configured. Set one of: GEMINI_API_KEY, ANTHROPIC_API_KEY, "
                 "OPENAI_API_KEY, DEEPSEEK_API_KEY, MOONSHOT_API_KEY, "
                 "AZURE_OPENAI_API_KEY+AZURE_OPENAI_ENDPOINT, OLLAMA_BASE_URL, "
+                "GRAPHIFY_ACP_COMMAND (an ACP agent, no key), "
                 "or AWS credentials. Pass backend= explicitly to select a provider."
             )
     if backend not in BACKENDS:
@@ -2102,7 +2149,7 @@ def extract_files_direct(
             file=sys.stderr,
         )
         key = "ollama"
-    if not key and backend not in ("bedrock", "claude-cli"):
+    if not key and backend not in ("bedrock", "claude-cli", "acp"):
         raise ValueError(
             f"No API key for backend '{backend}'. "
             f"Set {_format_backend_env_keys(backend)} or pass api_key=."
@@ -2126,6 +2173,8 @@ def extract_files_direct(
         result = _call_claude(key, mdl, user_msg, max_tokens=max_out, deep_mode=deep_mode, images=image_refs)
     elif backend == "claude-cli":
         result = _call_claude_cli(user_msg, max_tokens=max_out, deep_mode=deep_mode, images=image_refs)
+    elif backend == "acp":
+        result = _call_acp(user_msg, max_tokens=max_out, deep_mode=deep_mode, images=image_refs)
     elif backend == "bedrock":
         result = _call_bedrock(mdl, user_msg, max_tokens=max_out, deep_mode=deep_mode, images=image_refs)
     elif backend == "azure":
@@ -2784,6 +2833,10 @@ def extract_corpus_parallel(
     # over session state. Force serial unless the user explicitly opts in.
     if backend == "claude-cli" and os.environ.get("GRAPHIFY_CLAUDE_CLI_PARALLEL", "").strip() != "1":
         max_concurrency = 1
+    # An ACP agent is one shared subprocess (graphify/acp.py); serial by default
+    # so a subscription-backed agent is not hit with parallel sessions.
+    if backend == "acp" and os.environ.get("GRAPHIFY_ACP_PARALLEL", "").strip() != "1":
+        max_concurrency = 1
     def _checkpoint_chunk(result: dict, chunk: "list[Path | FileSlice]") -> None:
         # Persist each chunk's semantic results to the cache as soon as it
         # completes. Without this, the semantic cache is only written once, at
@@ -3056,7 +3109,7 @@ def _call_llm(
         ollama_url = _resolve_ollama_base_url(cfg.get("base_url", ""))
         _validate_ollama_base_url(ollama_url)
         key = "ollama"
-    if not key and backend not in ("bedrock", "claude-cli"):
+    if not key and backend not in ("bedrock", "claude-cli", "acp"):
         raise ValueError(
             f"No API key for backend '{backend}'. Set {_format_backend_env_keys(backend)}."
         )
@@ -3082,6 +3135,11 @@ def _call_llm(
         if u is not None:
             _rec(getattr(u, "input_tokens", 0), getattr(u, "output_tokens", 0))
         return _anthropic_response_text(resp.content, default="")
+
+    if backend == "acp":
+        from graphify import acp
+        reply, _stop, _agent = acp.prompt(prompt, timeout=_resolve_api_timeout())
+        return reply
 
     if backend == "claude-cli":
         import platform, shutil, subprocess
@@ -3325,7 +3383,7 @@ def _validate_ollama_base_url(url: str, *, warn: bool = True) -> None:
 _BACKEND_DETECTION_EXTRA_ENV = (
     "AZURE_OPENAI_ENDPOINT",
     "AWS_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION",
-    "OLLAMA_BASE_URL", "OLLAMA_HOST",
+    "OLLAMA_BASE_URL", "OLLAMA_HOST", "GRAPHIFY_ACP_COMMAND",
 )
 
 
@@ -3344,17 +3402,85 @@ def backend_detection_env_vars() -> tuple[str, ...]:
     return tuple(seen)
 
 
+_warned_unusable_saved: set[str] = set()
+
+
+def _backend_usable(name: str) -> bool:
+    """Whether a *saved* backend can run right now (so a stale choice never wins)."""
+    if name not in BACKENDS:
+        return False
+    if name == "acp":
+        from graphify.acp import acp_available
+
+        return acp_available()
+    if name == "claude-cli":
+        return _claude_cli_available()
+    if name in ("bedrock", "ollama"):
+        return True  # credentials / base URL come from the provider chain or default URL
+    if name == "azure":
+        return bool(_get_backend_api_key("azure") and os.environ.get("AZURE_OPENAI_ENDPOINT"))
+    return bool(_get_backend_api_key(name))
+
+
+def _saved_backend() -> str | None:
+    name = backend_config.load().get("backend")
+    if not name:
+        return None
+    if _backend_usable(name):
+        return name
+    if name not in _warned_unusable_saved:
+        _warned_unusable_saved.add(name)
+        print(
+            f"[graphify] saved backend '{name}' is not usable here "
+            f"(missing key or agent); auto-detecting instead. Saved in {backend_config.config_path()}.",
+            file=sys.stderr,
+        )
+    return None
+
+
+def remember_backend_choice(
+    *, backend: str | None = None, model: str | None = None, acp_command: str | None = None,
+) -> None:
+    """Save a backend choice made by hand so later runs reuse it (see backend_config)."""
+    if backend is not None and backend not in BACKENDS:
+        return
+    if not backend_config.save(backend=backend, model=model, acp_command=acp_command):
+        return
+    parts = [f"backend={backend}"] if backend else []
+    if model:
+        parts.append(f"model={model}")
+    if acp_command:
+        parts.append(f"acp-command={acp_command!r}")
+    print(
+        f"[graphify] saved {', '.join(parts)} as your default LLM backend "
+        f"({backend_config.config_path()}); pass --no-save to skip.",
+        file=sys.stderr,
+    )
+
+
 def detect_backend() -> str | None:
-    """Return the name of whichever backend has an API key set, or None.
+    """Return the backend to use when none was named, or None.
 
-    Priority: gemini → kimi → claude → openai → deepseek → azure → bedrock → ollama (last, opt-in).
+    Priority:
 
-    Ollama is intentionally checked LAST so a paid API key (Anthropic/OpenAI/etc.)
-    is never silently shadowed by an incidental OLLAMA_BASE_URL in the environment
-    — see security finding F-002/F-029. Setting OLLAMA_BASE_URL alongside a paid
-    key now keeps you on the paid backend; remove the paid key (or pass
-    --backend ollama explicitly) to route to the local model.
+    1. the choice saved by an earlier manual ``--backend`` (if still usable);
+    2. an ACP agent -- ``GRAPHIFY_ACP_COMMAND``, a saved ``--acp-command``, or the
+       built-in ``omp acp`` default when ``omp`` is on $PATH. It needs no API key;
+    3. an API key: gemini → kimi → claude → openai → deepseek → azure → bedrock →
+       ollama (last, opt-in).
+
+    Ollama is intentionally checked LAST among the key-based backends so a paid
+    API key (Anthropic/OpenAI/etc.) is never silently shadowed by an incidental
+    OLLAMA_BASE_URL in the environment — see security finding F-002/F-029.
+    Pass ``--backend`` (it is then saved) to choose a different backend.
     """
+    saved = _saved_backend()
+    if saved:
+        return saved
+    from graphify.acp import acp_available
+
+    if acp_available():
+        return "acp"
     for backend in ("gemini", "kimi", "claude", "openai", "deepseek"):
         if _get_backend_api_key(backend):
             return backend
@@ -3371,7 +3497,7 @@ def detect_backend() -> str | None:
         _validate_ollama_base_url(ollama_url)
         return "ollama"
     for name in BACKENDS:
-        if name not in ("gemini", "kimi", "claude", "openai", "deepseek", "azure", "bedrock", "ollama", "claude-cli"):
+        if name not in ("gemini", "kimi", "claude", "openai", "deepseek", "azure", "bedrock", "ollama", "claude-cli", "acp"):
             if _get_backend_api_key(name):
                 return name
     return None
@@ -3623,6 +3749,8 @@ def label_communities(
     if backend == "ollama" and os.environ.get("GRAPHIFY_OLLAMA_PARALLEL", "").strip() != "1":
         max_concurrency = 1
     if backend == "claude-cli" and os.environ.get("GRAPHIFY_CLAUDE_CLI_PARALLEL", "").strip() != "1":
+        max_concurrency = 1
+    if backend == "acp" and os.environ.get("GRAPHIFY_ACP_PARALLEL", "").strip() != "1":
         max_concurrency = 1
     workers = max(1, min(max_concurrency, n_batches))
 

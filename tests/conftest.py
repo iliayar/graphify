@@ -74,6 +74,10 @@ def _isolate_backend_env(monkeypatch):
 
     for key in backend_detection_env_vars():
         monkeypatch.delenv(key, raising=False)
+    # The built-in `omp acp` default would make detect_backend() pick ACP (and spawn
+    # a real agent) on any machine that has omp installed. Empty = no default; it
+    # is an env var, not a monkeypatch, so subprocess-run CLI tests inherit it.
+    monkeypatch.setenv("GRAPHIFY_ACP_DEFAULT_COMMAND", "")
 
 
 _ANALYZE_WARNING_FILTERS = (
