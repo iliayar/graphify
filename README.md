@@ -216,6 +216,16 @@ print a `git add` hint for files that can be committed.
 Per-platform commands that support project-scoped installs accept the same flag,
 for example `graphify claude install --project` or `graphify codex install --project`.
 
+**Nix:** the repo ships a flake (CLI wrapped with tree-sitter grammars from nixpkgs):
+```bash
+nix run github:Graphify-Labs/graphify -- --help     # one-off
+nix profile install github:Graphify-Labs/graphify   # install
+nix develop                                         # dev shell with grammars on GRAPHIFY_TS_GRAMMAR_PATH
+```
+
+**Extra tree-sitter grammars.** Besides the PyPI `tree-sitter-<lang>` packages, graphify finds compiled parsers at runtime in the directories listed in `GRAPHIFY_TS_GRAMMAR_PATH` (`:`-separated): `<dir>/<lang>.so`, `<dir>/parser/<lang>.so`, or a nixpkgs grammar output (`<dir>/parser`). Cangjie (`.cj`) and Nix (`.nix`) work this way: they need no Python dependency, only their grammar. A language without a bespoke extractor is added by registering its suffix in `graphify/extractors/tags.py` (`TAGS_LANGUAGES`) and, optionally, a richer tags query in `graphify/queries/<lang>.scm`; otherwise the grammar's own `queries/tags.scm` is used.
+
+
 > [!TIP]
 > Hitting `command not found`, a `pip`-on-Mac/Windows issue, PowerShell quoting, `uvx` usage, git-hook PATH quirks, or strict mode? See **[Installation](https://docs.graphify.com/installation)** and **[Troubleshooting](https://docs.graphify.com/troubleshooting)**.
 

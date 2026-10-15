@@ -57,6 +57,8 @@ LANGUAGE_ALIASES: dict[str, str] = {
     "swift": ".swift",
     "lua": ".lua",
     "zig": ".zig",
+    "cangjie": ".cj",
+    "nix": ".nix",
     "elixir": ".ex",
     "julia": ".jl",
     "dart": ".dart",

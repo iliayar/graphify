@@ -81,6 +81,7 @@ from graphify.extractors.terraform import extract_terraform, prepare_terraform, 
 from graphify.extractors.verilog import extract_verilog  # noqa: F401
 from graphify.extractors.vbnet import extract_vbnet, resolve_vbnet_partial_calls  # noqa: F401
 from graphify.extractors.zig import extract_zig  # noqa: F401
+from graphify.extractors.tags import TAGS_LANGUAGES, extract_tags  # noqa: F401
 from graphify.security import sanitize_metadata
 from graphify.paths import disambiguate_ambiguous_candidates
 
@@ -8550,6 +8551,8 @@ _DISPATCH: dict[str, Any] = {
     ".cls": extract_apex,
     ".trigger": extract_apex,
 }
+# Languages driven purely by a tree-sitter tags query (graphify/extractors/tags.py).
+_DISPATCH.update(dict.fromkeys(TAGS_LANGUAGES, extract_tags))
 
 
 # Extensions whose extractor depends on an optional-dependency extra

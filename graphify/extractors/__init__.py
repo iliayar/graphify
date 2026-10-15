@@ -7,6 +7,13 @@ later, separate step. See MIGRATION.md for how to port another language.
 """
 from __future__ import annotations
 
+# Must run before any extractor imports a `tree_sitter_<lang>` grammar: lets a
+# grammar be supplied as a compiled parser found via GRAPHIFY_TS_GRAMMAR_PATH
+# instead of a PyPI dependency (see graphify/ts_loader.py).
+from graphify import ts_loader as _ts_loader
+
+_ts_loader.install()
+
 from pathlib import Path
 from typing import Callable
 
@@ -34,6 +41,7 @@ from graphify.extractors.rust import extract_rust
 from graphify.extractors.sln import extract_sln
 from graphify.extractors.solidity import extract_solidity
 from graphify.extractors.sql import extract_sql
+from graphify.extractors.tags import extract_tags
 from graphify.extractors.terraform import extract_terraform
 from graphify.extractors.verilog import extract_verilog
 from graphify.extractors.vbnet import extract_vbnet
@@ -69,6 +77,7 @@ LANGUAGE_EXTRACTORS: dict[str, Callable[[Path], dict]] = {
     "sln": extract_sln,
     "solidity": extract_solidity,
     "sql": extract_sql,
+    "tags": extract_tags,
     "terraform": extract_terraform,
     "verilog": extract_verilog,
     "vbnet": extract_vbnet,

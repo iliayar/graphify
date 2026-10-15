@@ -1,0 +1,36 @@
+From 30587576b0312e0d6463e9bcb8cfcd4a9374873b Mon Sep 17 00:00:00 2001
+From: aiulms <aiulms@163.com>
+Date: Mon, 11 May 2026 23:14:25 +0800
+Subject: [PATCH] fix(scanner): write debug logs to stderr
+
+---
+ src/scanner.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/scanner.c b/src/scanner.c
+index 22a74ca..c116f75 100644
+--- a/src/scanner.c
++++ b/src/scanner.c
+@@ -21,10 +21,10 @@ static FILE* log_file = NULL;
+ static void logger(TSLexer* lexer, const char* msg) {
+   if (! DEBUG_SCANNER) return;
+   if (log_file == NULL) {
+-    fprintf(stdout, msg);
++    fprintf(stderr, "%s", msg);
+     return;
+   }
+-  fprintf(log_file, msg);
++  fprintf(log_file, "%s", msg);
+   fflush(log_file);
+ }
+ 
+@@ -199,4 +199,4 @@ bool tree_sitter_cangjie_external_scanner_scan(void *payload, TSLexer *lexer, co
+   }
+ 
+   return false;
+-}
+\ No newline at end of file
++}
+-- 
+GitCode
+

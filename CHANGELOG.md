@@ -2,6 +2,12 @@
 
 Full release notes with details on each version: [GitHub Releases](https://github.com/Graphify-Labs/graphify/releases)
 
+## Unreleased
+
+- Feat: **Cangjie** (`.cj`) and **Nix** (`.nix`) support through a generic tree-sitter tags-query extractor (`graphify/extractors/tags.py`): definitions, methods, supertypes, imports and calls come from `queries/*.scm`, so adding a language needs a grammar and a suffix, not a new extractor
+- Feat: tree-sitter grammars are now discovered at runtime from `GRAPHIFY_TS_GRAMMAR_PATH` (`graphify/ts_loader.py`), after installed PyPI packages; any `import tree_sitter_<lang>` in an extractor resolves to a dynamically supplied parser, so new grammars need no dependency in `pyproject.toml`
+- Feat: `flake.nix` — `nix run`/`nix build`/`nix develop` with grammars (including Cangjie) taken from nixpkgs and wired through `GRAPHIFY_TS_GRAMMAR_PATH`
+
 ## 0.9.91 (2026-10-14)
 
 Eight community pull requests: a Windows MCP-stdio hang fix, Rust/JS/TS/extract call-resolution and id-collision fixes, an Ollama context-size fix, and a clustering label-retention fix. The AST cache schema is bumped, so the first build after upgrading re-extracts.

@@ -1,0 +1,44 @@
+{
+  "nodes": {
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1791956154,
+        "narHash": "sha256-jBYGPi4udQ9uo4KQp9m2J0546nJVQitG15gvZSaVVAs=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "55bfb4d7437bd4e09ab7cba58a43bd68eb310044",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "nixpkgs": "nixpkgs",
+        "tree-sitter-cangjie-src": "tree-sitter-cangjie-src"
+      }
+    },
+    "tree-sitter-cangjie-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1780277500,
+        "narHash": "sha256-HxWaFU6DDlukItDoyX977EQxQm60T2KtxNhEl5HUXeA=",
+        "ref": "refs/heads/main",
+        "rev": "2fac636da4191550463a456396cb2680121acf6b",
+        "revCount": 24,
+        "type": "git",
+        "url": "https://gitcode.com/Cangjie-SIG/tree-sitter-cangjie.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://gitcode.com/Cangjie-SIG/tree-sitter-cangjie.git"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
